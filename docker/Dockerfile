@@ -1,110 +1,47 @@
-#########################################################################################
-##  Stage 2: build DALI wheels on top of the dependencies image built in Stage 1
-#########################################################################################
-ARG DEPS_IMAGE_NAME
-# clean builder without source code inside
-FROM ${DEPS_IMAGE_NAME} as builder
+FROM nvidia/cuda:11.1-devel-ubuntu18.04
 
-ARG PYVER=3.6
-ARG PYV=36
+ARG WORK_DIR="/work"
 
-ENV PYVER=${PYVER} PYV=${PYV} PYTHONPATH=/opt/python/v
+ENV DEBIAN_FRONTEND=noninteractive
 
-ENV PYBIN=${PYTHONPATH}/bin \
-    PYLIB=${PYTHONPATH}/lib
+SHELL ["/bin/bash", "-c"]
 
-ENV PATH=/opt/python/cp36-cp36/bin:/opt/python/cp37-cp37m/bin:/opt/python/cp38-cp38/bin:/opt/python/cp39-cp39/bin:${PYBIN}:${PATH} \
-    LD_LIBRARY_PATH=/usr/local/lib:/opt/dali/${DALI_BUILD_DIR}:/opt/python/cp36-cp36/lib:/opt/python/cp37-cp37m/lib:/opt/python/cp38-cp38/lib:/opt/python/cp39-cp39/lib:${PYLIB}:${LD_LIBRARY_PATH} \
-    LIBRARY_PATH=/usr/local/lib:/opt/dali/${DALI_BUILD_DIR}:/opt/python/cp36-cp36/lib:/opt/python/cp37-cp37m/lib:/opt/python/cp38-cp38/lib:/opt/python/cp39-cp39/lib:${PYLIB}:${LIBRARY_PATH}
+RUN sed -i 's@archive.ubuntu.com@jp.archive.ubuntu.com@g' /etc/apt/sources.list
 
-RUN ln -s /opt/python/cp${PYV}* /opt/python/v
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    wget \
+    unzip \
+    git \
+    rsync \
+    libjpeg-dev \
+    dh-autoreconf \
+    gcc-aarch64-linux-gnu \
+    g++-aarch64-linux-gnu \
+    pkg-config \
+    libtool \
+    libtool-bin \
+    python3-distutils \
+    autogen \
+    zip \
+    python3.6 python3.6-dev \
+    python3-pip
 
-# install Python bindings and patch it to use the clang we have here
-RUN pip install future setuptools wheel clang && \
-    PY_CLANG_PATH=$(echo $(pip show clang) | sed 's/.*Location: \(.*\) Requires.*/\1/')/clang/cindex.py && \
-    LIBCLANG_PATH=/usr/local/lib/libclang.so && \
-    sed -i "s|library_file = None|library_file = \"${LIBCLANG_PATH}\"|" ${PY_CLANG_PATH} && \
-    rm -rf /root/.cache/pip/
+RUN pip3 install --upgrade pip && \
+    pip3 install --upgrade setuptools && \
+    pip3 install torch==1.9.1+cu111 torchvision==0.10.1+cu111 -f https://download.pytorch.org/whl/torch_stable.html && \
+    pip3 install --extra-index-url https://developer.download.nvidia.com/compute/redist --upgrade nvidia-dali-cuda110 && \
+    pip3 install mlperf_compliance && \
+    pip3 install pycocotools
 
-RUN ldconfig
+WORKDIR ${WORK_DIR}
 
-WORKDIR /opt/dali
+RUN git clone https://github.com/NVIDIA/apex.git && \
+    cd apex && \
+    pip3 install -v --disable-pip-version-check --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" ./ && \
+    cd ${WORK_DIR}
 
-ARG CC
-ARG CXX
-ENV CC=${CC}
-ENV CXX=${CXX}
-# Optional build arguments
+RUN git clone https://github.com/rsek147/DALI-SSD.git dali-ssd
 
-ARG ARCH
-ENV ARCH=${ARCH}
-ARG CUDA_TARGET_ARCHS
-ENV CUDA_TARGET_ARCHS=${CUDA_TARGET_ARCHS}
-ARG CMAKE_BUILD_TYPE
-ENV CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
-ARG BUILD_TEST
-ENV BUILD_TEST=${BUILD_TEST}
-ARG BUILD_BENCHMARK
-ENV BUILD_BENCHMARK=${BUILD_BENCHMARK}
-ARG BUILD_NVTX
-ENV BUILD_NVTX=${BUILD_NVTX}
-ARG BUILD_PYTHON
-ENV BUILD_PYTHON=${BUILD_PYTHON}
-ARG BUILD_LMDB
-ENV BUILD_LMDB=${BUILD_LMDB}
-ARG BUILD_JPEG_TURBO
-ENV BUILD_JPEG_TURBO=${BUILD_JPEG_TURBO}
-ARG BUILD_NVJPEG
-ENV BUILD_NVJPEG=${BUILD_NVJPEG}
-ARG BUILD_NVJPEG2K
-ENV BUILD_NVJPEG2K=${BUILD_NVJPEG2K}
-ARG BUILD_LIBTIFF
-ENV BUILD_LIBTIFF=${BUILD_LIBTIFF}
-ARG BUILD_LIBSND
-ENV BUILD_LIBSND=${BUILD_LIBSND}
-ARG BUILD_LIBTAR
-ENV BUILD_LIBTAR=${BUILD_LIBTAR}
-ARG BUILD_FFTS
-ENV BUILD_FFTS=${BUILD_FFTS}
-ARG BUILD_NVOF
-ENV BUILD_NVOF=${BUILD_NVOF}
-ARG BUILD_NVDEC
-ENV BUILD_NVDEC=${BUILD_NVDEC}
-ARG BUILD_NVML
-ENV BUILD_NVML=${BUILD_NVML}
-ARG BUILD_CUFILE
-ENV BUILD_CUFILE=${BUILD_CUFILE}
-ARG LINK_DRIVER
-ENV LINK_DRIVER=${LINK_DRIVER}
-ARG BUILD_WITH_ASAN
-ENV BUILD_WITH_ASAN=${BUILD_WITH_ASAN}
-ARG BUILD_WITH_LSAN
-ENV BUILD_WITH_LSAN=${BUILD_WITH_LSAN}
-ARG BUILD_WITH_UBSAN
-ENV BUILD_WITH_UBSAN=${BUILD_WITH_UBSAN}
-ARG STRIP_BINARY
-ENV STRIP_BINARY=${STRIP_BINARY}
-ARG VERBOSE_LOGS
-ENV VERBOSE_LOGS=${VERBOSE_LOGS}
-ARG NVIDIA_DALI_BUILD_FLAVOR
-ENV NVIDIA_DALI_BUILD_FLAVOR=${NVIDIA_DALI_BUILD_FLAVOR}
-ARG GIT_SHA
-ENV GIT_SHA=${GIT_SHA}
-ARG DALI_TIMESTAMP
-ENV DALI_TIMESTAMP=${DALI_TIMESTAMP}
-ARG WHL_PLATFORM_NAME
-ENV WHL_PLATFORM_NAME=${WHL_PLATFORM_NAME}
-ARG EXTRA_CMAKE_OPTIONS
-ENV EXTRA_CMAKE_OPTIONS=${EXTRA_CMAKE_OPTIONS}
-
-ARG NVIDIA_BUILD_ID
-ENV NVIDIA_BUILD_ID ${NVIDIA_BUILD_ID:-0}
-RUN mkdir /wheelhouse && chmod 0777 /wheelhouse
-
-FROM builder
-COPY . .
-
-ARG DALI_BUILD_DIR=build-docker-release
-WORKDIR /opt/dali/${DALI_BUILD_DIR}
-
-RUN bash /opt/dali/docker/build_helper.sh
+RUN apt-get clean && rm -rf /root/.cache/pip
