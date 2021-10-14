@@ -92,7 +92,7 @@ def get_train_loader(args, dboxes):
 
 
 def get_val_dataset(args):
-    dboxes = dboxes300_coco()
+    dboxes = dboxes300_coco(args.backbone)
     val_trans = SSDTransformer(dboxes, args,(300, 300), val=True)
 
     val_annotate = os.path.join(args.data, "annotations/instances_val2017.json")
