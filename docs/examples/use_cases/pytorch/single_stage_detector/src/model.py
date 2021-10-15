@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from torchvision.models.resnet import resnet18, resnet34, resnet50, resnet101, resnet152
-from torchvision.models import mobilenet_v2
+from torchvision.models import mobilenet_v2, mobilenet_v3_large
 
 # Apex imports
 try:
@@ -46,9 +46,14 @@ class MobileNet(nn.Module):
         super().__init__()
         if backbone == 'mobilenetv2':
             backbone = mobilenet_v2(pretrained=True)
+            cutoff = -1
             self.out_channels = [576, 1280, 512, 256, 256, 64]
+        elif backbone == 'mobilenetv3':
+            backbone = mobilenet_v3_large(pretrained=True)
+            cutoff = -2
+            self.out_channels = [672, 960, 512, 256, 256, 64]
         
-        self.feature_extractor = nn.Sequential(*list(backbone.children())[:-1])
+        self.feature_extractor = nn.Sequential(*list(backbone.children())[:cutoff])
     
     def forward(self, x):
         x = self.feature_extractor(x)
@@ -61,8 +66,9 @@ class SSD300(nn.Module):
 
         if self.backbone in ['resnet18', 'resnet34', 'resnet50', 'resnet101', 'resnet152']:
             self.feature_extractor = ResNet(backbone=backbone)
-        elif self.backbone in ['mobilenetv2']:
+        elif self.backbone in ['mobilenetv2', 'mobilenetv3']:
             self.feature_extractor = MobileNet(backbone=backbone)
+            self.extra_branch_layer = [14] if self.backbone == 'mobilenetv2' else [13]
 
         self.label_num = 81  # number of COCO classes
         self._build_additional_features(self.feature_extractor.out_channels)
@@ -102,15 +108,16 @@ class SSD300(nn.Module):
                     )
 
                 self.additional_blocks.append(layer)
-        elif self.backbone in ['mobilenetv2']:
+        elif self.backbone in ['mobilenetv2', 'mobilenetv3']:
+            activation = nn.ReLU6(inplace=True) if self.backbone == 'mobilenetv2' else nn.Hardswish(inplace=True)
             for i, (input_size, output_size, channels) in enumerate(zip(input_size[1:-1], input_size[2:], [256, 128, 128, 64])):
                 layer = nn.Sequential(
                     nn.Conv2d(input_size, channels, kernel_size=1, bias=False),
                     nn.BatchNorm2d(channels),
-                    nn.ReLU6(inplace=True),
+                    activation,
                     nn.Conv2d(channels, output_size, kernel_size=3, padding=1, stride=2, bias=False),
                     nn.BatchNorm2d(output_size),
-                    nn.ReLU6(inplace=True),
+                    activation,
                 )
 
                 self.additional_blocks.append(layer)
@@ -137,10 +144,10 @@ class SSD300(nn.Module):
         if self.backbone in ['resnet18', 'resnet34', 'resnet50', 'resnet101', 'resnet152']:
             x = self.feature_extractor(x)
             detection_feed = [x]
-        elif self.backbone in ['mobilenetv2']:
+        elif self.backbone in ['mobilenetv2', 'mobilenetv3']:
             detection_feed = []
             for i, module in enumerate(list(self.feature_extractor.feature_extractor[0].children())):
-                if i in [14]:
+                if i in self.extra_branch_layer:
                     x = list(module.children())[0][:1](x)
                     detection_feed.append(x)
                     x = list(module.children())[0][1:](x)

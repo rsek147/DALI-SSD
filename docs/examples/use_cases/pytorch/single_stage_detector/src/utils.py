@@ -275,7 +275,7 @@ def dboxes300_coco(backbone):
     if backbone in ['resnet18', 'resnet34', 'resnet50', 'resnet101', 'resnet152']:
         feat_size = [38, 19, 10, 5, 3, 1]
         steps = [8, 16, 32, 64, 100, 300]
-    elif backbone in ['mobilenetv2']:
+    elif backbone in ['mobilenetv2', 'mobilenetv3']:
         feat_size = [19, 10, 5, 3, 2, 1]
         steps = [16, 32, 64, 100, 150, 300]
     # use the scales here: https://github.com/amdegroot/ssd.pytorch/blob/master/data/config.py
