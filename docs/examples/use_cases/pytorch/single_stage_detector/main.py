@@ -6,7 +6,7 @@ import math
 import numpy as np
 import time
 import torch
-from torch.optim.lr_scheduler import MultiStepLR
+from torch.optim.lr_scheduler import MultiStepLR, CosineAnnealingLR
 import torch.utils.data.distributed
 
 
@@ -92,6 +92,9 @@ def make_parser():
         '--multistep', nargs='*', type=int, default=[43, 54],
         help='epochs at which to decay learning rate')
     parser.add_argument(
+        '--cosine-lr', action='store_true',
+        help='use cosine learning rate')
+    parser.add_argument(
         '--target', type=float, default=None,
         help='target mAP to assert against at the end')
 
@@ -156,11 +159,18 @@ def train(args):
         lr=args.learning_rate,
         momentum=args.momentum,
         weight_decay=args.weight_decay)
-
-    scheduler = MultiStepLR(
-        optimizer=optimizer, 
-        milestones=args.multistep, 
-        gamma=0.1)
+    
+    if args.cosine_lr:
+        scheduler = CosineAnnealingLR(
+            optimizer=optimizer,
+            T_max=args.epochs,
+            eta_min=args.learning_rate / 100,
+            last_epoch=-1)
+    else:
+        scheduler = MultiStepLR(
+            optimizer=optimizer, 
+            milestones=args.multistep, 
+            gamma=0.1)
 
     if args.fp16:
         if args.amp:
