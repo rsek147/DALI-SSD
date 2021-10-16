@@ -60,7 +60,7 @@ class MobileNet(nn.Module):
         return x
 
 class SSD300(nn.Module):
-    def __init__(self, backbone='resnet50'):
+    def __init__(self, backbone='resnet50', classes=81):
         super().__init__()
         self.backbone = backbone
 
@@ -70,7 +70,7 @@ class SSD300(nn.Module):
             self.feature_extractor = MobileNet(backbone=backbone)
             self.extra_branch_layer = [14] if self.backbone == 'mobilenetv2' else [13]
 
-        self.label_num = 81  # number of COCO classes
+        self.label_num = classes + 1  # number of classes
         self._build_additional_features(self.feature_extractor.out_channels)
         self.num_defaults = [4, 6, 6, 6, 4, 4]
         self.loc = []
@@ -166,8 +166,8 @@ class SSD300(nn.Module):
         # For SSD 300, shall return nbatch x 8732 x {nlabels, nlocs} results
         return locs, confs
 
-def model(args):
-    ssd300 = SSD300(backbone=args.backbone)
+def model(args, classes):
+    ssd300 = SSD300(backbone=args.backbone, classes=classes)
     ssd300.cuda()
 
     if args.fp16 and not args.amp:

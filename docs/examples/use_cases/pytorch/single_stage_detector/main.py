@@ -147,8 +147,10 @@ def train(args):
     encoder = Encoder(dboxes)
     cocoGt = get_coco_ground_truth(args)
 
-    ssd300 = model(args)
+    ssd300 = model(args, len(cocoGt.cats))
     args.learning_rate = args.learning_rate * args.N_gpu * (args.batch_size / 32)
+    print('Number of classes: {}'.format(len(cocoGt.cats)))
+    print('Initial learning rate: {}'.format(args.learning_rate))
     iteration = 0
     loss_func = Loss(dboxes)
 
