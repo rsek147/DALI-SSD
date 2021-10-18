@@ -91,6 +91,9 @@ def make_parser():
         '--save', type=str, default='./checkpoint',
         help='save model checkpoints in the specified directory')
     parser.add_argument(
+        '--mode', type=str, default='training',
+        choices=['training', 'evaluation'])
+    parser.add_argument(
         '--evaluation', nargs='*', type=int,
         default=[3, 21, 31, 37, 42, 48, 53, 59, 64],
         help='epochs at which to evaluate')
@@ -201,6 +204,13 @@ def train(args):
             return
 
     val_dataloader, inv_map = get_val_dataloader(args)
+
+    if args.mode == 'evaluation':
+        acc = evaluate(ssd300, val_dataloader, cocoGt, encoder, inv_map, args)
+        if args.local_rank == 0:
+            print('Model precision {} mAP'.format(acc))
+        return acc, 0
+
     train_loader = get_train_loader(args, dboxes)
 
     acc = 0
@@ -265,7 +275,7 @@ if __name__ == "__main__":
     avg_speed = num_shards * avg_speed
     training_time = time.time() - start_time
 
-    if args.local_rank == 0:
+    if args.local_rank == 0 and args.mode == 'training':
         print("Training end: Average speed: {:3f} img/sec, Total time: {:3f} sec, Final accuracy: {:3f} mAP"
           .format(avg_speed, training_time, acc))
 
