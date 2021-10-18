@@ -14,7 +14,7 @@ from src.model import model, Loss
 from src.utils import dboxes300_coco, Encoder
 
 from src.evaluate import evaluate
-from src.train import train_loop, tencent_trick
+from src.train import train_loop, tencent_trick, load_checkpoint
 from src.data import *
 
 # Apex imports
@@ -50,7 +50,7 @@ class Logger:
     def start_epoch(self):
         self.epoch_start = time.time()
 
-    def end_epoch(self):
+    def end_epoch(self, epoch):
         epoch_time = time.time() - self.epoch_start
         epoch_speed = self.processed_samples / epoch_time
 
@@ -60,7 +60,7 @@ class Logger:
 
         if self.local_rank == 0:
             print('Epoch {:2d} finished. Time: {:4f} s, Speed: {:4f} img/sec, Average speed: {:4f}'
-                .format(len(self.epochs_times)-1, epoch_time, epoch_speed * self.n_gpu, self.average_speed() * self.n_gpu))
+                .format(epoch, epoch_time, epoch_speed * self.n_gpu, self.average_speed() * self.n_gpu))
 
     def average_speed(self):
         return sum(self.epochs_speeds) / len(self.epochs_speeds)
@@ -84,6 +84,12 @@ def make_parser():
     parser.add_argument(
         '--seed', '-s', type=int, default=0,
         help='manually set random seed for torch')
+    parser.add_argument(
+        '--checkpoint', type=str, default=None,
+        help='path to model checkpoint file')
+    parser.add_argument(
+        '--save', type=str, default='./checkpoint',
+        help='save model checkpoints in the specified directory')
     parser.add_argument(
         '--evaluation', nargs='*', type=int,
         default=[3, 21, 31, 37, 42, 48, 53, 59, 64],
@@ -151,6 +157,7 @@ def train(args):
     args.learning_rate = args.learning_rate * args.N_gpu * (args.batch_size / 32)
     print('Number of classes: {}'.format(len(cocoGt.cats)))
     print('Initial learning rate: {}'.format(args.learning_rate))
+    start_epoch = 0
     iteration = 0
     loss_func = Loss(dboxes)
 
@@ -179,6 +186,19 @@ def train(args):
             optimizer = amp_handle.wrap_optimizer(optimizer)
         else:
             optimizer = FP16_Optimizer(optimizer, static_loss_scale=128.)
+    
+    if args.checkpoint is not None:
+        if os.path.isfile(args.checkpoint):
+            load_checkpoint(ssd300.module if args.distributed else ssd300, args.checkpoint)
+            checkpoint = torch.load(args.checkpoint,
+                                    map_location=lambda storage, loc: storage.cuda(torch.cuda.current_device()))
+            start_epoch = checkpoint['epoch']
+            iteration = checkpoint['iteration']
+            scheduler.load_state_dict(checkpoint['scheduler'])
+            optimizer.load_state_dict(checkpoint['optimizer'])
+        else:
+            print('Provided checkpoint is not path to a file')
+            return
 
     val_dataloader, inv_map = get_val_dataloader(args)
     train_loader = get_train_loader(args, dboxes)
@@ -186,7 +206,7 @@ def train(args):
     acc = 0
     logger = Logger(args.batch_size, args.local_rank, args.N_gpu)
     
-    for epoch in range(0, args.epochs):
+    for epoch in range(start_epoch, args.epochs + 1):
         logger.start_epoch()
         scheduler.step()
 
@@ -194,12 +214,25 @@ def train(args):
             ssd300, loss_func, epoch, optimizer, 
             train_loader, iteration, logger, args)
 
-        logger.end_epoch()
+        logger.end_epoch(epoch)
 
         if epoch in args.evaluation:
             acc = evaluate(ssd300, val_dataloader, cocoGt, encoder, inv_map, args)
             if args.local_rank == 0:
                 print('Epoch {:2d}, Accuracy: {:4f} mAP'.format(epoch, acc))
+        
+        if args.save and args.local_rank == 0:
+            print("saving model...")
+            obj = {'epoch': epoch + 1,
+                   'iteration': iteration,
+                   'optimizer': optimizer.state_dict(),
+                   'scheduler': scheduler.state_dict()}
+            if args.distributed:
+                obj['model'] = ssd300.module.state_dict()
+            else:
+                obj['model'] = ssd300.state_dict()
+            save_path = os.path.join(args.save, 'epoch_{}.pt'.format(epoch))
+            torch.save(obj, save_path)
 
         if args.data_pipeline == 'dali':
             train_loader.reset()
@@ -211,7 +244,7 @@ if __name__ == "__main__":
     parser = make_parser()
     args = parser.parse_args()
     if args.local_rank == 0:
-        os.makedirs('./models', exist_ok=True)
+        os.makedirs(args.save, exist_ok=True)
 
     torch.backends.cudnn.benchmark = True
 

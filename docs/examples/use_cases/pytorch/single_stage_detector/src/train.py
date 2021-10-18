@@ -57,6 +57,16 @@ def warmup(optim, warmup_iters, iteration, base_lr):
         for param_group in optim.param_groups:
             param_group['lr'] = new_lr
 
+def load_checkpoint(model, checkpoint):
+    """
+    Load model from checkpoint.
+    """
+    print("loading model checkpoint", checkpoint)
+    od = torch.load(checkpoint)
+
+    # remove proceeding 'N.' from checkpoint that comes from DDP wrapper
+    saved_model = od["model"]
+    model.load_state_dict(saved_model)
 
 def tencent_trick(model):
     """
